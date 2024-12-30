@@ -16,15 +16,20 @@ export function ActorSearch({ onSelect }) {
     debounce(async (searchQuery) => {
       if (searchQuery.length < 2) {
         setResults([]);
+        setLoading(false);
         return;
       }
-
+  
       setLoading(true);
       try {
+        console.log('Searching with token:', process.env.NEXT_PUBLIC_TMDB_TOKEN?.substring(0, 10) + '...'); // Debug - only show first 10 chars
         const data = await searchPerson(searchQuery);
+        console.log('Search results:', data); // Debug
         setResults(data?.results || []);
       } catch (error) {
-        console.error("Search error:", error);
+        console.error('Search error:', error);
+        // You might want to add a state for error messages if you want to show them to users
+        setResults([]);
       } finally {
         setLoading(false);
       }
