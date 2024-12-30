@@ -1,4 +1,4 @@
-"use strict";
+"use client";
 
 // Types and Interfaces
 interface BoxOfficeMetrics {
@@ -29,7 +29,7 @@ export interface ActorValue {
   leadingRoleValue: number;
 }
 
-// Market Data
+// Market Data and Constants
 export const marketRegions = {
   northAmerica: ['usa', 'canada'],
   europe: ['uk', 'france', 'germany', 'italy', 'spain', 'benelux', 'scandinavia'],
@@ -151,27 +151,32 @@ export const marketMultipliers = {
   }
 };
 
-// Actor Value Calculations
+// Main Actor Value Calculation
 export async function calculateActorMarketValue(actor: any): Promise<ActorValue> {
   const boxOfficeMetrics = await calculateActorBoxOfficeValue(actor);
   const territoryValues = calculateTerritoryValues(boxOfficeMetrics);
   
+  // Calculate global value based on recent performance and star power
+  const globalValue = Math.min(
+    ((boxOfficeMetrics.recentBoxOffice.leadRolePerformance * 1.5) +
+    (boxOfficeMetrics.recentBoxOffice.globalRevenue * 0.5)) / 2,
+    5  // Cap at 5x multiplier
+  );
+
   return {
-    globalValue: boxOfficeMetrics.marketAppeal.domestic,
-    territoryValues: territoryValues,
+    globalValue,
+    territoryValues,
     genreStrength: boxOfficeMetrics.genrePerformance,
     leadingRoleValue: boxOfficeMetrics.recentBoxOffice.leadRolePerformance
   };
 }
 
+// Detailed Box Office Analysis
 async function calculateActorBoxOfficeValue(actor: any): Promise<any> {
   const recentMovies = actor.known_for?.filter((movie: any) => {
     const releaseDate = new Date(movie.release_date);
     const yearsAgo = (new Date().getFullYear() - releaseDate.getFullYear());
-    const isRecentEnough = yearsAgo <= 5;
-    const isLeadRole = movie.order <= 3;
-    
-    return movie.media_type === 'movie' && isRecentEnough;
+    return movie.media_type === 'movie' && yearsAgo <= 5;
   }) || [];
 
   const boxOfficeMetrics: BoxOfficeMetrics = {
@@ -183,35 +188,42 @@ async function calculateActorBoxOfficeValue(actor: any): Promise<any> {
     territoryStrength: {}
   };
 
-  // Process each movie's contribution to actor value
+  // Process each movie's impact
   recentMovies.forEach(movie => {
-    const revenueImpact = movie.revenue ? movie.revenue / 100000000 : 0;
+    const revenueImpact = movie.revenue ? movie.revenue / 100000000 : 0; // Convert to hundreds of millions
     const isLeadRole = movie.order <= 2;
     const yearsAgo = new Date().getFullYear() - new Date(movie.release_date).getFullYear();
-    const recencyMultiplier = Math.pow(0.9, yearsAgo);
+    const recencyMultiplier = Math.pow(0.9, yearsAgo); // More recent = higher value
     
+    // Calculate lead role impact
+    const roleMultiplier = isLeadRole ? 1.5 : 0.7;
+    
+    // Update metrics
     boxOfficeMetrics.globalRevenue += revenueImpact * recencyMultiplier;
-    boxOfficeMetrics.leadRolePerformance += isLeadRole ? revenueImpact * 1.5 : revenueImpact;
+    boxOfficeMetrics.leadRolePerformance += isLeadRole ? (revenueImpact * 1.5) : (revenueImpact * 0.5);
     
     if (movie.genre_ids) {
       movie.genre_ids.forEach(genreId => {
-        boxOfficeMetrics.genreSpecificSuccess += revenueImpact * 0.5;
+        boxOfficeMetrics.genreSpecificSuccess += revenueImpact * roleMultiplier * 0.5;
       });
     }
   });
 
+  // Calculate market appeal
+  const marketAppeal = {
+    domestic: Math.min(boxOfficeMetrics.globalRevenue * 0.4, 5),
+    international: Math.min(boxOfficeMetrics.globalRevenue * 0.6, 5),
+    genreSpecific: {}
+  };
+
   return {
     recentBoxOffice: boxOfficeMetrics,
-    marketAppeal: {
-      domestic: Math.min(boxOfficeMetrics.globalRevenue * 0.4, 5),
-      international: Math.min(boxOfficeMetrics.globalRevenue * 0.6, 5),
-      genreSpecific: {}
-    },
+    marketAppeal,
     genrePerformance: {}
   };
 }
 
-// Project Value Calculations
+// Project Value Calculation with Enhanced Cast Impact
 export function calculateProjectValue(
   budget: number,
   genre: string,
@@ -227,19 +239,30 @@ export function calculateProjectValue(
     tier => budget >= tier.min && budget <= tier.max
   ) || marketMultipliers.budgetTiers.indie;
 
-  // Calculate cast value
-  const castValue = cast.reduce((acc, actor) => {
+  // Calculate enhanced cast value with diminishing returns
+  const castValue = cast.reduce((acc, actor, index) => {
     const actorValue = actor.valueMetrics?.globalValue || 1;
     const territorySpecificValue = actor.valueMetrics?.territoryValues?.[region] || 1;
-    return acc + (actorValue * territorySpecificValue);
-  }, 1) / Math.max(cast.length, 1);
+    const leadingRoleImpact = actor.valueMetrics?.leadingRoleValue || 1;
+    
+    // Apply position-based weighting (first few cast members matter more)
+    const positionMultiplier = Math.max(1 - (index * 0.15), 0.5);
+    
+    // Combine all factors
+    const actorImpact = actorValue * territorySpecificValue * leadingRoleImpact * positionMultiplier;
+    
+    return acc + actorImpact;
+  }, 0);
+
+  // Apply logarithmic scaling to cast value to prevent overinflation
+  const scaledCastValue = Math.log(castValue + 1) * 1.5 + 1;
 
   // Calculate genre impact
   const genreMultiplier = territoryData.genreFactors?.[genre.toLowerCase()] || 1;
 
   // Final calculations
   const baseValue = budget * territoryData.baseMultiplier * budgetTier.multiplier;
-  const adjustedValue = baseValue * castValue * genreMultiplier;
+  const adjustedValue = baseValue * scaledCastValue * genreMultiplier;
 
   return {
     ask: Math.round(adjustedValue),
