@@ -239,30 +239,28 @@ export function calculateProjectValue(
     tier => budget >= tier.min && budget <= tier.max
   ) || marketMultipliers.budgetTiers.indie;
 
-  // Calculate enhanced cast value with diminishing returns
-  const castValue = cast.reduce((acc, actor, index) => {
+  // Calculate base value with much lower starting point without cast
+  const baseMultiplier = cast.length === 0 ? 0.2 : 1.0; // Significantly reduce value without cast
+  const baseValue = budget * territoryData.baseMultiplier * budgetTier.multiplier * baseMultiplier;
+
+  // Calculate cumulative cast value that ADDS with each actor
+  const castMultiplier = cast.reduce((total, actor, index) => {
     const actorValue = actor.valueMetrics?.globalValue || 1;
     const territorySpecificValue = actor.valueMetrics?.territoryValues?.[region] || 1;
     const leadingRoleImpact = actor.valueMetrics?.leadingRoleValue || 1;
     
-    // Apply position-based weighting (first few cast members matter more)
-    const positionMultiplier = Math.max(1 - (index * 0.15), 0.5);
+    // Position-based weighting (first actors matter more but all add value)
+    const positionMultiplier = Math.max(1 - (index * 0.1), 0.7);
     
-    // Combine all factors
-    const actorImpact = actorValue * territorySpecificValue * leadingRoleImpact * positionMultiplier;
-    
-    return acc + actorImpact;
-  }, 0);
-
-  // Apply logarithmic scaling to cast value to prevent overinflation
-  const scaledCastValue = Math.log(castValue + 1) * 1.5 + 1;
+    // Each actor ADDS to the total multiplier
+    return total + (actorValue * territorySpecificValue * leadingRoleImpact * positionMultiplier);
+  }, 1.0); // Start at 1.0 as base, then add for each actor
 
   // Calculate genre impact
   const genreMultiplier = territoryData.genreFactors?.[genre.toLowerCase()] || 1;
 
   // Final calculations
-  const baseValue = budget * territoryData.baseMultiplier * budgetTier.multiplier;
-  const adjustedValue = baseValue * scaledCastValue * genreMultiplier;
+  const adjustedValue = baseValue * castMultiplier * genreMultiplier;
 
   return {
     ask: Math.round(adjustedValue),
