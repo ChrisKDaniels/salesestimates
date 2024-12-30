@@ -188,37 +188,33 @@ async function calculateActorBoxOfficeValue(actor: any): Promise<any> {
     territoryStrength: {}
   };
 
-  // Process each movie's impact
+  // Process each movie with stronger multipliers
   recentMovies.forEach(movie => {
-    const revenueImpact = movie.revenue ? movie.revenue / 100000000 : 0; // Convert to hundreds of millions
+    const revenueImpact = movie.revenue ? movie.revenue / 100000000 : 0;
     const isLeadRole = movie.order <= 2;
     const yearsAgo = new Date().getFullYear() - new Date(movie.release_date).getFullYear();
-    const recencyMultiplier = Math.pow(0.9, yearsAgo); // More recent = higher value
+    const recencyMultiplier = Math.pow(0.95, yearsAgo); // Less aggressive decay
     
-    // Calculate lead role impact
-    const roleMultiplier = isLeadRole ? 1.5 : 0.7;
+    // Stronger lead role impact
+    const roleMultiplier = isLeadRole ? 2.0 : 0.8; // Increased difference
     
-    // Update metrics
-    boxOfficeMetrics.globalRevenue += revenueImpact * recencyMultiplier;
-    boxOfficeMetrics.leadRolePerformance += isLeadRole ? (revenueImpact * 1.5) : (revenueImpact * 0.5);
+    boxOfficeMetrics.globalRevenue += revenueImpact * recencyMultiplier * 1.5; // Increased base impact
+    boxOfficeMetrics.leadRolePerformance += isLeadRole ? (revenueImpact * 2.0) : (revenueImpact * 0.7);
     
     if (movie.genre_ids) {
       movie.genre_ids.forEach(genreId => {
-        boxOfficeMetrics.genreSpecificSuccess += revenueImpact * roleMultiplier * 0.5;
+        boxOfficeMetrics.genreSpecificSuccess += revenueImpact * roleMultiplier * 0.8;
       });
     }
   });
 
-  // Calculate market appeal
-  const marketAppeal = {
-    domestic: Math.min(boxOfficeMetrics.globalRevenue * 0.4, 5),
-    international: Math.min(boxOfficeMetrics.globalRevenue * 0.6, 5),
-    genreSpecific: {}
-  };
-
   return {
     recentBoxOffice: boxOfficeMetrics,
-    marketAppeal,
+    marketAppeal: {
+      domestic: Math.min(boxOfficeMetrics.globalRevenue * 0.6, 8), // Increased caps
+      international: Math.min(boxOfficeMetrics.globalRevenue * 0.8, 8),
+      genreSpecific: {}
+    },
     genrePerformance: {}
   };
 }
@@ -239,28 +235,29 @@ export function calculateProjectValue(
     tier => budget >= tier.min && budget <= tier.max
   ) || marketMultipliers.budgetTiers.indie;
 
-  // Calculate base value with much lower starting point without cast
-  const baseMultiplier = cast.length === 0 ? 0.2 : 1.0; // Significantly reduce value without cast
+  // Base value without cast should be very low
+  const baseMultiplier = cast.length === 0 ? 0.1 : 1.0;
   const baseValue = budget * territoryData.baseMultiplier * budgetTier.multiplier * baseMultiplier;
 
-  // Calculate cumulative cast value that ADDS with each actor
+  // Calculate cumulative cast value - IMPORTANT CHANGE
   const castMultiplier = cast.reduce((total, actor, index) => {
     const actorValue = actor.valueMetrics?.globalValue || 1;
     const territorySpecificValue = actor.valueMetrics?.territoryValues?.[region] || 1;
     const leadingRoleImpact = actor.valueMetrics?.leadingRoleValue || 1;
     
-    // Position-based weighting (first actors matter more but all add value)
-    const positionMultiplier = Math.max(1 - (index * 0.1), 0.7);
+    // First actors matter more but all add substantial value
+    const positionMultiplier = 1 - (index * 0.05); // Less aggressive reduction
     
-    // Each actor ADDS to the total multiplier
-    return total + (actorValue * territorySpecificValue * leadingRoleImpact * positionMultiplier);
-  }, 1.0); // Start at 1.0 as base, then add for each actor
+    // Each actor ADDS to the total value
+    const actorContribution = (actorValue * territorySpecificValue * leadingRoleImpact * positionMultiplier);
+    console.log(`Actor ${actor.name} contribution:`, actorContribution);
+    
+    return total + actorContribution;
+  }, 1.0);
 
-  // Calculate genre impact
+  // Apply cast multiplier more aggressively
   const genreMultiplier = territoryData.genreFactors?.[genre.toLowerCase()] || 1;
-
-  // Final calculations
-  const adjustedValue = baseValue * castMultiplier * genreMultiplier;
+  const adjustedValue = baseValue * (castMultiplier * 1.5) * genreMultiplier;
 
   return {
     ask: Math.round(adjustedValue),
